@@ -174,7 +174,7 @@ use English;
 #------------------------------------------------------------------------------
 
 use vars qw( $VERSION );
-$VERSION = '0.021';
+$VERSION = '0.022';
 
 #------------------------------------------------------------------------------
 #
@@ -192,6 +192,7 @@ my %ATTRIBUTES = (
     'IGNORE_UNKNOWN'    => 'should we ignore unknown HTML elements?',
     'CHECK_MIME_TYPES'  => 'should we check the MIME types of links?',
     'ACCEPT_LANGUAGE'   => 'array ref to list of languages to accept',
+    'DELAY'             => 'delay between robot requests (minutes)',
 );
 
 my %ATTRIBUTE_DEFAULT = (
@@ -764,6 +765,9 @@ sub required_attributes_set
 
     $self->{ 'AGENT' }->from( $self->{ 'EMAIL' } );
     $self->{ 'AGENT' }->agent( $self->{ 'NAME' } . '/' . $self->{ 'VERSION' } );
+    $self->{ 'AGENT' }->delay( $self->{ 'DELAY' } )
+        if defined( $self->{ 'DELAY' } )
+    ;
 
     if ( defined( $self->{ 'TRAVERSAL' } ) )
     {
@@ -1377,6 +1381,11 @@ Default: LWP::RobotUA object created by the robot
 Optionally allows the caller to specify the list of languages that the robot
 accepts. This is added as an "Accept-Language" header field in the HTTP
 request. Takes an array reference.
+
+=item DELAY
+
+Optionally set the delay between requests for the user agent, in minutes. The
+default for this is 1 (see LWP::RobotUA).
 
 =back
 

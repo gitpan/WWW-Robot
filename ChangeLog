@@ -41,3 +41,9 @@ Friday May  7 09:54:41 BST 1999
 * listUrls method added
 * unshiftUrl method added
 * CHECK_MIME_TYPES attribute added
+
+**** Release 0.022 *****
+
+Thu Dec  9 11:58:36 GMT 1999
+
+* DELAY attribute added
