@@ -160,10 +160,9 @@ use strict;
 
 use HTTP::Request;
 use HTTP::Status;
-use HTML::LinkExtor;
-use HTML::TreeBuilder;
+use HTML::TreeBuilder 3.03;
 use URI::URL;
-use LWP::RobotUA;
+use LWP::RobotUA 1.171;
 use IO::File;
 use English;
 
@@ -174,7 +173,7 @@ use English;
 #------------------------------------------------------------------------------
 
 use vars qw( $VERSION );
-$VERSION = '0.022';
+$VERSION = '0.023';
 
 #------------------------------------------------------------------------------
 #
@@ -193,6 +192,9 @@ my %ATTRIBUTES = (
     'CHECK_MIME_TYPES'  => 'should we check the MIME types of links?',
     'ACCEPT_LANGUAGE'   => 'array ref to list of languages to accept',
     'DELAY'             => 'delay between robot requests (minutes)',
+    'ANY_URL'           => 'whether to omit default URL filtering',
+    'ANY_LINK'          => 'whether to restrict to default link types',
+    'ANY_CONTENT'       => 'whether to offer content of non-HTML documents',
 );
 
 my %ATTRIBUTE_DEFAULT = (
@@ -201,6 +203,9 @@ my %ATTRIBUTE_DEFAULT = (
     'IGNORE_TEXT'       => 1,
     'IGNORE_UNKNOWN'    => 1,
     'CHECK_MIME_TYPES'  => 1,
+    'ANY_URL'           => 0,
+    'ANY_LINK'          => 0,
+    'ANY_CONTENT'       => 0,
 );
 
 my %SUPPORTED_HOOKS = (
@@ -341,7 +346,19 @@ sub run
             $url = new URI::URL( $base );
         }
 
-        if ( $response->content_type eq 'text/html' )
+        if ( $response->content_type ne 'text/html' )
+        {
+	    if ( $self->{'ANY_CONTENT'} )
+	    {
+                $self->invoke_hook_procedures(
+                    'invoke-on-contents', 
+                    $url,
+                   $response, 
+                   undef  # no $structure
+                );
+	    }
+	}
+        else
         {
 
             my $contents = $response->content;
@@ -835,7 +852,7 @@ sub required_hooks_set
 
 #------------------------------------------------------------------------------
 #
-# extract_links - extract links from a URL, using HTML::LinkExtor:
+# extract_links - extract links from a URL, using HTML::Element's extract_links()
 #       $url            - a URI::URL object for the URL
 #       $base           - the base (from the HTTP::Response)
 #       $contents       - the contents (from the HTTP::Response)
@@ -851,57 +868,49 @@ sub extract_links
 
     my %url_seen;
 
-    $self->verbose( "Extract links from $url (base = $base) ..." );
+    $self->verbose( "Extract links from $url (base = $base) ...\n" );
 
-    my ( @links );
+    my ( $link_extor ) = new HTML::TreeBuilder->new->parse($contents);
 
-    my $link_extor = new HTML::LinkExtor( 
+    my ( @default_link_types ) = ('a','area','frame');
+	# () means 'all types'
 
-        # anonymous callback function for HTML::LinkExtor
+    my @abslinks = ();
 
-        sub {
+    my @eltlinks = map { $_->[0] } @{
+	$self->{ 'ANY_LINK' } ?
+	    $link_extor->extract_links() :
+	    $link_extor->extract_links(@default_link_types)
+	};
 
-            my ( $tag, %attr ) = @_; 
-            my ( $link );
+	foreach my $link (@eltlinks)
+	{
 
-            # grab anchor / area / frame links
+            $self->verbose( "Process link: '$link'\n" );
 
-            if( lc( $tag ) =~ /^a(?:rea)?$/ )
-            {
-                return unless defined( $link = $attr{ 'href' } );
-            }
-            elsif ( lc( $tag ) eq 'frame' )
-            {
-                return unless defined( $link = $attr{ 'src' } );
-            }
-            else
-            {
-                return;
-            }
-
-            $self->verbose( "\n\t$link ..." );
             # ignore page internal links
 
-            return if $link =~ m!^#!;
+            next if $link =~ m!^#!;
 
             # strip hashes (i.e. ignore / don't distinguish page internal links)
 
             $link =~ s!#.*!!;
 
-            # only follow html links (.html or .htm or no extension)
-
-            unless ( $link =~ /\.s?html?/ || $link =~ m{/$} )
-            # lets assume .s?html  or "/" type links really are text/html
+            unless ( $self->{ 'ANY_URL' } ||
+                # only follow html links (.html or .htm or no extension)
+		$link =~ /\.s?html?/ || $link =~ m{/$} )
+                # lets assume .s?html  or "/" type links really are text/html
             {
                 # put in some obvious ones here ...
-                return if $link =~ 
+                next if $link =~ 
                     /(?:ftp|gopher|mailto|news|telnet|javascript):/
                 ;
-                return if $link =~ /\.(?:gif|jpe?g)/;
+                next if $link =~ /\.(?:gif|jpe?g)/;
                 if ( $self->{ 'CHECK_MIME_TYPES' } )
                 {
+		    # grab anchor / area / frame links
                     $self->verbose( " check mime type ..." );
-                    return unless 
+                    next unless 
                         $self->check_mime_type( $link, [ 'text/html' ] )
                     ;
                 }
@@ -909,7 +918,7 @@ sub extract_links
 
             # only follow links we haven't seen yet ...
 
-            return if $url_seen{ $link };
+            next if $url_seen{ $link };
             $url_seen{ $link }++;
 
             my $link_url = eval { new URI::URL( $link, $url ) };
@@ -922,27 +931,20 @@ sub extract_links
                 next;
             }
             my $link_url_abs = $link_url->abs();
-            return if ( 
+            next if ( 
                 exists $self->{ 'HOOKS' }->{ 'add-url-test' } and 
                 not $self->invoke_hook_functions( 
                     'add-url-test', 
                     $link_url_abs
                 ) 
             );
-            push( @links, $link_url_abs );
-            $self->verbose( " OK" );
-        },
-        $base
-    );
+            push( @abslinks, $link_url_abs );
+            $self->verbose( "Adding  link: '$link_url_abs'\n" );
 
-    # do the business ...
-
-    $link_extor->parse( $contents );
-
-    # ... and return the links created in the callback
+	}
 
     $self->verbose( "\n" );
-    return( @links );
+    return( @abslinks );
 }
 
 #------------------------------------------------------------------------------
