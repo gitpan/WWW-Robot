@@ -1,4 +1,8 @@
-#-----------------------------------------------------------------------
+#------------------------------------------------------------------------------
+#
+# Start of POD
+#
+#------------------------------------------------------------------------------
 
 =head1 NAME
 
@@ -6,42 +10,17 @@ WWW::Robot - configurable web traversal engine (for web robots & agents)
 
 =head1 SYNOPSIS
 
-   use WWW::Robot;
+    use WWW::Robot;
    
-   $robot = new WWW::Robot('NAME'     => 'MyRobot',
-			   'VERSION'  => '1.000',
-			   'EMAIL'    => 'fred@foobar.com');
+    $robot = new WWW::Robot(
+        'NAME'     => 'MyRobot',
+        'VERSION'  => '1.000',
+        'EMAIL'    => 'fred@foobar.com'
+    );
    
-   # ... configure the robot's operation ...
-   
-   $robot->run('http://www.foobar.com/');
-
-=cut
-
-#-----------------------------------------------------------------------
-
-package WWW::Robot;
-require 5.002;
-use strict;
-
-
-use HTTP::Request;
-use HTTP::Status;
-use HTML::LinkExtor;
-use HTML::TreeBuilder;
-use URI::URL;
-use LWP::RobotUA;
-use IO::File;
-
-use English;
-
-#-----------------------------------------------------------------------
-#	Public Global Variables
-#-----------------------------------------------------------------------
-use vars qw($VERSION);
-$VERSION   = '0.017';
-
-#-----------------------------------------------------------------------
+    # ... configure the robot's operation ...
+       
+    $robot->run( 'http://www.foobar.com/' );
 
 =head1 DESCRIPTION
 
@@ -114,18 +93,6 @@ This would need a useful file format.
 
 =item *
 
-Should the AGENT be an attribute, so you can set this to whatever
-UserAgent object you want to use?
-Then if the attribute is not set by the first time the C<run()>
-method is invoked, we'd fall back on the default.
-
-=item *
-
-Should TMPDIR and WORKFILE be attributes? I don't see any big reason
-why they should, but someone else's application might benefit?
-
-=item *
-
 Should the module also support an ERRLOG attribute, with all warnings
 and error messages sent there?
 
@@ -149,6 +116,7 @@ The basic architecture of the Robot is as follows:
         Skip if not HTML
         Foreach link on page:
             Hook: invoke-on-link
+            Hook: add-url-test
             Add link to robot's queue
     Continue? Hook: continue-test
     Hook: save-state
@@ -180,333 +148,706 @@ C<invoke-on-link>
 
 =cut
 
-#=======================================================================
+#------------------------------------------------------------------------------
+#
+# End of POD
+#
+#------------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------
-#			Global constants
-#-----------------------------------------------------------------------
-my %ATTRIBUTES =
-(
- 'NAME',         	    'Name of the Robot',
- 'VERSION',      	    'Version of the Robot, N.NNN',
- 'EMAIL',        	    'Contact email address for Robot owner',
- 'REQUEST_DELAY',           'Delay between requests to the same server',
- 'TRAVERSAL',    	    'traversal order - depth or breadth',
- 'VERBOSE',      	    'boolean flag for verbose reporting',
- 'IGNORE_TEXT',             'should we ignore text content of HTML?',
- 'IGNORE_UNKNOWN',          'should we ignore unknown HTML elements?',
- 'ACCEPT_LANGUAGE',         'array ref to list of languages to accept',
+package WWW::Robot;
+require 5.002;
+use strict;
+
+use HTTP::Request;
+use HTTP::Status;
+use HTML::LinkExtor;
+use HTML::TreeBuilder;
+use URI::URL;
+use LWP::RobotUA;
+use IO::File;
+use English;
+
+#------------------------------------------------------------------------------
+#
+# Public Global Variables
+#
+#------------------------------------------------------------------------------
+
+use vars qw( $VERSION );
+$VERSION = '0.021';
+
+#------------------------------------------------------------------------------
+#
+# Private Global Variables
+#
+#------------------------------------------------------------------------------
+
+my %ATTRIBUTES = (
+    'NAME'              => 'Name of the Robot',
+    'VERSION'           => 'Version of the Robot, N.NNN',
+    'EMAIL'             => 'Contact email address for Robot owner',
+    'TRAVERSAL'         => 'traversal order - depth or breadth',
+    'VERBOSE'           => 'boolean flag for verbose reporting',
+    'IGNORE_TEXT'       => 'should we ignore text content of HTML?',
+    'IGNORE_UNKNOWN'    => 'should we ignore unknown HTML elements?',
+    'CHECK_MIME_TYPES'  => 'should we check the MIME types of links?',
+    'ACCEPT_LANGUAGE'   => 'array ref to list of languages to accept',
 );
 
-my %ATTRIBUTE_DEFAULT =
-(
- 'REQUEST_DELAY',           1,
- 'TRAVERSAL',    	    'depth',
- 'VERBOSE',                 0,
- 'IGNORE_TEXT',             1,
- 'IGNORE_UNKNOWN',          1,
+my %ATTRIBUTE_DEFAULT = (
+    'TRAVERSAL'         => 'depth',
+    'VERBOSE'           => 0,
+    'IGNORE_TEXT'       => 1,
+    'IGNORE_UNKNOWN'    => 1,
+    'CHECK_MIME_TYPES'  => 1,
 );
 
-
-my %SUPPORTED_HOOKS =
-(
- 'restore-state',           'opportunity for client to restore state',
- 'invoke-on-all-url',       'invoked on all URLs, even those not visited',
- 'follow-url-test',         'return true if robot should visit the URL',
- 'invoke-on-followed-url',  'invoked on only those URLs which are visited',
- 'invoke-on-get-error',     'invoked when an HTTP request results in error',
- 'invoke-on-contents',      'invoked on the contents of each visited URL',
- 'invoke-on-link',          'invoked on all links seen on a page',
- 'continue-test',           'return true if robot should continue iterating',
- 'save-state',              'opportunity for client to save state after a run',
- 'generate-report',         'report for the run just finished',
- 'modified-since',          'returns a modified-since time for URL passed',
- 'invoke-after-get',        'invoked right after every GET request',
+my %SUPPORTED_HOOKS = (
+    'restore-state'             => 'opportunity for client to restore state',
+    'invoke-on-all-url'         => 'invoked on all URLs (even not visited)',
+    'follow-url-test'           => 'return true if robot should visit the URL',
+    'invoke-on-followed-url'    => 'invoked on only URLs which are visited',
+    'invoke-on-get-error'       => 'invoked when HTTP request results in error',
+    'invoke-on-contents'        => 'invoked on contents of each visited URL',
+    'invoke-on-link'            => 'invoked on all links seen on a page',
+    'add-url-test'              => 'returns true if robot should add URL',
+    'continue-test'             => 'return true if should continue iterating',
+    'save-state'                => 'opportunity for client to save state',
+    'generate-report'           => 'report for the run just finished',
+    'modified-since'            => 'returns modified-since time for URL passed',
+    'invoke-after-get'          => 'invoked right after every GET request',
 );
 
-#-----------------------------------------------------------------------
-# A list of directories to try, in order, as the place where we will
-# create temporary files. Last entry is '.' so we create in the current
-# directory. What will this do on non-Unix boxen?
-#-----------------------------------------------------------------------
-my @TMPDIR_OPTIONS = ('/usr/tmp', '/tmp', '/var/tmp', '/temp',
-                      '/Win95/temp', '/windows/temp',
-                      '.');
-
-#-----------------------------------------------------------------------
-#	Private Global Variables
-#-----------------------------------------------------------------------
-
-
-#=======================================================================
+#------------------------------------------------------------------------------
 
 =head1 CONSTRUCTOR
 
    $robot = new WWW::Robot( <attribute-value-pairs> );
 
-Create a new robot engine instance.
-If the constructor fails for any reason, a warning message will be printed,
-and C<undef> will be returned.
+Create a new robot engine instance.  If the constructor fails for any reason, a
+warning message will be printed, and C<undef> will be returned.
 
-Having created a new robot, it should be configured using the methods
-described below.
-Certain attributes of the Robot can be set during creation;
-they can be (re)set after creation, using the C<setAttribute()> method.
+Having created a new robot, it should be configured using the methods described
+below.  Certain attributes of the Robot can be set during creation; they can be
+(re)set after creation, using the C<setAttribute()> method.
 
-The attributes of the Robot are described below,
-in the I<Robot Attributes> section.
+The attributes of the Robot are described below, in the I<Robot Attributes>
+section.
 
 =cut
 
-#=======================================================================
+#------------------------------------------------------------------------------
 
 sub new
 {
     my $class    = shift;
     my %options  = @ARG;
 
-    my $object;
-
-
-    #-------------------------------------------------------------------
     # The two argument version of bless() enables correct subclassing.
     # See the "perlbot" and "perlmod" documentation in perl distribution.
-    #-------------------------------------------------------------------
-    $object = bless {}, $class;
 
-    return $object->initialise(\%options);
+    my $object = bless {}, $class;
+
+    return $object->initialise( \%options );
 }
 
-#-----------------------------------------------------------------------
+#==============================================================================
 
 =head1 METHODS
 
 =cut
 
-#-----------------------------------------------------------------------
+#==============================================================================
 
-#=======================================================================
+#------------------------------------------------------------------------------
 
 =head2 run
 
-    $robot->run( LIST );
+    $robot->run( @url_list );
 
-Invokes the robot, initially traversing the root URLs provided in LIST,
-and any which have been provided with the C<addUrl()> method before
-invoking C<run()>.
-If you have not correctly configured the robot, the method will
+Invokes the robot, initially traversing the root URLs provided in C<@url_list>,
+and any which have been provided with the C<addUrl()> method before invoking
+C<run()>.  If you have not correctly configured the robot, the method will
 return C<undef>.
 
-The initial set of URLs can either be passed as arguments to the
-B<run()> method, or with the B<addUrl()> method before you
-invoke B<run()>.
-Each URL can be specified either as a string,
-or as a URI::URL object.
+The initial set of URLs can either be passed as arguments to the B<run()>
+method, or with the B<addUrl()> method before you invoke B<run()>.  Each URL
+can be specified either as a string, or as a URI::URL object.
 
-Before invoking this method, you should have provided at least some of
-the hook functions.
-See the example given in the EXAMPLES section below.
+Before invoking this method, you should have provided at least some of the hook
+functions.  See the example given in the EXAMPLES section below.
 
-By default the B<run()> method will iterate until there are no more
-URLs in the queue.
-You can override this behavior by providing a C<continue-test> hook
-function, which checks for the termination conditions.
-This particular hook function, and use of hook functions in general,
-are described below.
+By default the B<run()> method will iterate until there are no more URLs in the
+queue.  You can override this behavior by providing a C<continue-test> hook
+function, which checks for the termination conditions.  This particular hook
+function, and use of hook functions in general, are described below.
 
 =cut
 
-#=======================================================================
+#------------------------------------------------------------------------------
 
 sub run
 {
     my $self      = shift;
-    my @url_list  = @ARG;			# optional list of URLs
+    my @url_list  = @ARG; # optional list of URLs
+
+    return undef unless $self->required_attributes_set();
+    return undef unless $self->required_hooks_set();
+
+    $self->addUrl( @url_list );
+    $self->invoke_hook_procedures( 'restore-state' );
 
     my $url;
-    my $filename;
-    my $response;
-    my @page_urls;
-    my $link_url;
-    my $structure;
-    my $noindex;
-    my $nofollow;
 
-
-    $self->pre_run_check() || return undef;
-
-    $self->addUrl(@url_list);
-
-    $self->invoke_hook_procedures('restore-state');
-
-    #-------------------------------------------------------------------
-    # MAIN LOOP of the robot. Of course this is all obvious, so we won't
-    # go into it. Comment above describes the basic architecture.
-    #-------------------------------------------------------------------
-    while ($url = $self->next_url())
+    while ( $url = $self->next_url() )
     {
-        $self->verbose($url, "\n");
+        $self->verbose( $url, "\n" );
 
-	$self->invoke_hook_procedures('invoke-on-all-url', $url);
+        $self->invoke_hook_procedures( 'invoke-on-all-url', $url );
+        next unless $self->invoke_hook_functions( 'follow-url-test', $url );
+        $self->invoke_hook_procedures( 'invoke-on-followed-url', $url );
 
-	next unless $self->invoke_hook_functions('follow-url-test', $url);
+        my $response = $self->get_url( $url );
 
-	$self->invoke_hook_procedures('invoke-on-followed-url', $url);
-
-	($response, $structure, $filename) = $self->get_url($url);
-
-        #---------------------------------------------------------------
         # This hook function is for people who want to see the result
         # of every GET, so they can deal with odd cases, or whatever
-        #---------------------------------------------------------------
-        $self->invoke_hook_procedures('invoke-after-get', $url, $response);
 
-	if ($response->is_error)
-	{
-	    $self->invoke_hook_procedures('invoke-on-get-error',
-					   $url, $response);
-	    next;
-	}
+        $self->invoke_hook_procedures( 'invoke-after-get', $url, $response );
+
+        if ( $response->is_error )
+        {
+            $self->invoke_hook_procedures(
+                'invoke-on-get-error',
+                $url, 
+                $response
+            );
+            next;
+        }
+
+        # If the request got a 304 (not modified), then we
+        # can stop at this point.
 
         next if $response->code == RC_NOT_MODIFIED;
 
-        #---------------------------------------------------------------
         # The response says we should use something else as the BASE
         # from which to resolve any relative URLs. This might be from
         # a BASE element in the HEAD, or just "foo" which should be "foo/"
-        #---------------------------------------------------------------
-        if ($response->base ne $url)
+
+        my $base = $response->base;
+
+        if ( $base ne $url )
         {
-            $url = new URI::URL($response->base);
+            $url = new URI::URL( $base );
         }
 
-	#---------------------------------------------------------------
-	# Check page for page specific robot exclusion commands
-	#---------------------------------------------------------------
-        if ($response->content_type eq 'text/html')
+        if ( $response->content_type eq 'text/html' )
         {
-            ($noindex, $nofollow) = $self->check_protocol($structure, $url);
-            if ($nofollow == 0)
+
+            my $contents = $response->content;
+            $self->verbose( "Parse $url into HTML::TreeBuilder ..." );
+            my $structure = new HTML::TreeBuilder;
+            $structure->ignore_text if $self->getAttribute( 'IGNORE_TEXT' );
+            $structure->ignore_unknown 
+                if $self->getAttribute( 'IGNORE_UNKNOWN' )
+            ;
+            $structure->parse( $contents );
+            $self->verbose( "\n" );
+
+            my @page_urls;
+
+            # Check page for page specific robot exclusion commands
+
+            my ( $noindex, $nofollow ) = 
+                $self->check_protocol( $structure, $url )
+            ;
+            if ( $nofollow == 0 )
             {
-                @page_urls = $self->extract_links($url, $response, $structure,
-                                                   $filename);
+                $self->verbose( "Extract links from $url\n" );
+                @page_urls = $self->extract_links( $url, $base, $contents );
             }
+            if ( $noindex == 0 )
+            {
+                $self->invoke_hook_procedures(
+                    'invoke-on-contents', 
+                    $url,
+                   $response, 
+                   $structure
+                );
+
+                # delete required, because of potential circular links
+
+            }
+            foreach my $link_url ( @page_urls )
+            {
+                $self->invoke_hook_procedures(
+                    'invoke-on-link', 
+                    $url, 
+                    $link_url
+                );
+                $self->addUrl( $link_url );
+            }
+            $structure->delete() if defined $structure;
         }
-	if ($noindex == 0)
-	{
-            # we invoke with oldurl, so robot app sees it
-	    $self->invoke_hook_procedures('invoke-on-contents', $url,
-					   $response, $structure, $filename);
-	}
-
-	$structure->delete() if defined $structure;
-
-	next unless $response->content_type eq 'text/html';
-
-	foreach $link_url (@page_urls)
-	{
-	    $self->invoke_hook_procedures('invoke-on-link', $url, $link_url);
-	    $self->addUrl($link_url);
-	}
     }
     continue
     {
-	#------------------------------------------------------------------
-	# If there is no continue-test hook, then we will continue until
+        # If there is no continue-test hook, then we will continue until
         # there are no more URLs.
-	#------------------------------------------------------------------
-        last if (exists $self->{'HOOKS'}->{'continue-test'}
-                 && not $self->invoke_hook_functions('continue-test'));
+
+        last if ( 
+            exists $self->{ 'HOOKS' }->{ 'continue-test' } and 
+            not $self->invoke_hook_functions( 'continue-test' ) 
+        );
     }
 
-    $self->invoke_hook_procedures('save-state');
-    $self->invoke_hook_procedures('generate-report');
+    $self->invoke_hook_procedures( 'save-state' );
+    $self->invoke_hook_procedures( 'generate-report' );
 
     return 1;
 }
 
-#=======================================================================
-# pre_run_check() - check that all required configuration has been done
-#
-# This private method is called just before we enter the main control
-# loop in the run() method, to make sure that everything is set up right.
-#=======================================================================
+#------------------------------------------------------------------------------
 
-sub pre_run_check
+=head2 setAttribute
+
+  $robot->setAttribute( ... attribute-value-pairs ... );
+
+Change the value of one or more robot attributes.  Attributes are identified
+using a string, and take scalar values.  For example, to specify the name of
+your robot, you set the C<NAME> attribute:
+
+   $robot->setAttribute( 'NAME' => 'WebStud' );
+
+The supported attributes for the Robot module are listed below, in the I<ROBOT
+ATTRIBUTES> section.
+
+=cut
+
+#------------------------------------------------------------------------------
+
+sub setAttribute
+{
+    my $self   = shift;
+    my %attrs  = @ARG;
+
+    while ( my ( $attribute, $value ) = each( %attrs ) )
+    {
+        unless ( exists $ATTRIBUTES{ $attribute } )
+	{
+	    $self->warn( "unknown attribute $attribute - ignoring it." );
+	    next;
+	}
+        $self->{ $attribute } = $value;
+    }
+}
+
+#------------------------------------------------------------------------------
+
+=head2 getAttribute
+
+  $value = $robot->getAttribute( 'attribute-name' );
+
+Queries a Robot for the value of an attribute.  For example, to query the
+version number of your robot, you would get the C<VERSION> attribute:
+
+   $version = $robot->getAttribute( 'VERSION' );
+
+The supported attributes for the Robot module are listed below, in the I<ROBOT
+ATTRIBUTES> section.
+
+=cut
+
+#------------------------------------------------------------------------------
+
+sub getAttribute
+{
+    my $self       = shift;
+    my $attribute  = shift;
+
+    unless ( exists $ATTRIBUTES{ $attribute } )
+    {
+	$self->warn( "unknown attribute $attribute" );
+	return undef;
+    }
+
+    return $self->{ $attribute };
+}
+
+#------------------------------------------------------------------------------
+
+=head2 getAgent
+
+  $agent = $robot->getAgent();
+
+Returns the agent that is being used by the robot.
+
+=cut
+
+#------------------------------------------------------------------------------
+
+sub getAgent
 {
     my $self = shift;
 
+    return $self->{ 'AGENT' };
+}
 
-    #-------------------------------------------------------------------
-    # Check that mandatory attributes have been set
-    #-------------------------------------------------------------------
-    if (!exists $self->{'NAME'}
-        || !exists $self->{'VERSION'}
-        || !exists $self->{'EMAIL'})
+#------------------------------------------------------------------------------
+
+=head2 addUrl
+
+  $robot->addUrl( $url1, ..., $urlN );
+
+Used to add one or more URLs to the queue for the robot.  Each URL can be
+passed as a simple string, or as a URI::URL object.
+
+Returns True (non-zero) if all URLs were successfully added, False (zero) if at
+least one of the URLs could not be added.
+
+=cut
+
+#------------------------------------------------------------------------------
+
+sub addUrl
+{
+    my $self       = shift;
+    my @list       = @ARG;
+
+    my $status     = 1;
+
+    foreach my $url ( @list )
     {
-	$self->warn("You haven't set all of the required robot attributes.",
-                    "They are: NAME, VERSION and EMAIL attributes");
+	next if exists $self->{ 'SEEN_URL' }->{ $url };
+
+	# create a URI::URL object for the url, if needed
+	
+        my $urlObject;
+
+	if ( ref $url )
+	{
+	    $urlObject = $url;
+	}
+        else
+	{
+	    $urlObject = eval { new URI::URL($url) };
+	    if ( $EVAL_ERROR )
+	    {
+		$self->warn( <<WARNING );
+Unable to create URI::URL object for $url: $EVAL_ERROR
+WARNING
+		$status = 0;
+		next;
+	    }
+	}
+
+	# Mark the URL as having been seen by the robot, then add it
+	# to the list of URLs for the robot to visit. Doing it this way
+	# means we won't get duplicate URLs on the list.
+	
+	$self->{ 'SEEN_URL' }->{ $url } = 1;
+	# $self->{ 'URL_LIST' } = [] if not exists $self->{ 'URL_LIST' };
+	push( @{ $self->{ 'URL_LIST' } }, $urlObject );
+    }
+
+    return $status;
+}
+
+#------------------------------------------------------------------------------
+
+=head2 unshiftUrl
+
+  $robot->unshiftUrl( $url1, ..., $urlN );
+
+Used to add one or more URLs to the queue for the robot.  Each URL can be
+passed as a simple string, or as a URI::URL object.
+
+Returns True (non-zero) if all URLs were successfully added, False (zero) if at
+least one of the URLs could not be added.
+
+=cut
+
+#------------------------------------------------------------------------------
+
+sub unshiftUrl
+{
+    my $self       = shift;
+    my @list       = @ARG;
+
+    my $status     = 1;
+
+    foreach my $url ( @list )
+    {
+	next if exists $self->{ 'SEEN_URL' }->{ $url };
+
+	# create a URI::URL object for the url, if needed
+	
+        my $urlObject;
+
+	if ( ref $url )
+	{
+	    $urlObject = $url;
+	}
+        else
+	{
+	    $urlObject = eval { new URI::URL($url) };
+	    if ( $EVAL_ERROR )
+	    {
+		$self->warn( <<WARNING );
+Unable to create URI::URL object for $url: $EVAL_ERROR
+WARNING
+		$status = 0;
+		next;
+	    }
+	}
+
+	# Mark the URL as having been seen by the robot, then add it
+	# to the list of URLs for the robot to visit. Doing it this way
+	# means we won't get duplicate URLs on the list.
+	
+	$self->{ 'SEEN_URL' }->{ $url } = 1;
+	# $self->{ 'URL_LIST' } = [] if not exists $self->{ 'URL_LIST' };
+	unshift( @{ $self->{ 'URL_LIST' } }, $urlObject );
+    }
+
+    return $status;
+}
+
+#------------------------------------------------------------------------------
+
+=head2 listUrls
+
+  $robot->listUrls( );
+
+Returns a list of the URLs currently in the robots list to be traversed.
+
+=cut
+
+#------------------------------------------------------------------------------
+
+sub listUrls
+{
+    my $self = shift;
+    return @{ $self->{ 'URL_LIST' } };
+}
+
+#------------------------------------------------------------------------------
+
+=head2 addHook
+
+  $robot->addHook( $hook_name, \&hook_function );
+  
+  sub hook_function { ... }
+
+Register a I<hook> function which should be invoked by the robot at a specific
+point in the control flow. There are a number of I<hook points> in the robot,
+which are identified by a string.  For a list of hook points, see the
+B<SUPPORTED HOOKS> section below.
+
+If you provide more than one function for a particular hook, then the hook
+functions will be invoked in the order they were added.  I.e. the first hook
+function called will be the first hook function you added.
+
+=cut
+
+#------------------------------------------------------------------------------
+
+sub addHook
+{
+    my $self       = shift;
+    my $hook_name  = shift;
+    my $hook_fn    = shift;
+
+    if ( not exists $SUPPORTED_HOOKS{ $hook_name } )
+    {
+	$self->warn( <<WARNING );
+Unknown hook name $hook_name; Ignoring it!
+WARNING
 	return undef;
     }
 
-    #-------------------------------------------------------------------
-    # The robot application must provide a follow-url-test hook
-    #-------------------------------------------------------------------
-    if (!exists $self->{'HOOKS'}->{'follow-url-test'})
+    if ( ref( $hook_fn ) ne 'CODE' )
     {
-	$self->warn("You must provide a `follow-url-test' hook.");
+	$self->warn( <<WARNING );
+$hook_fn is not a function reference; Ignoring it
+WARNING
 	return undef;
     }
 
-    #-------------------------------------------------------------------
-    # You must provide at least one of the following hook functions
-    #-------------------------------------------------------------------
-    if (not (   exists $self->{'HOOKS'}->{'invoke-on-all-url'}
-             || exists $self->{'HOOKS'}->{'invoke-on-followed-url'}
-             || exists $self->{'HOOKS'}->{'invoke-on-contents'}
-             || exists $self->{'HOOKS'}->{'invoke-on-link'}))
+    if ( exists $self->{ 'HOOKS' }->{ $hook_name } )
     {
-	$self->warn("You must provide at least one invoke-on-* hook.",
-                    "Please see the documentation.\n");
-	return undef;
+	push( @{ $self->{ 'HOOKS' }->{ $hook_name } }, $hook_fn );
+    }
+    else
+    {
+	$self->{ 'HOOKS' }->{ $hook_name } = [ $hook_fn ];
     }
 
     return 1;
 }
 
-#=======================================================================
-# extract_links() - extract links from a file
-#	$url      - a URI::URL object for the URL we're extracting links from
-#	$response - a HTTP::Response object for the response of the GET
-#	$filename - the path to the local file which is a copy of contents
-#   RETURNS     a LIST of the extracted links
+#------------------------------------------------------------------------------
+
+=head2 proxy, no_proxy, env_proxy
+
+These are convenience functions are setting proxy information on the
+User agent being used to make the requests.
+
+    $robot->proxy( protocol, proxy );
+
+Used to specify a proxy for the given scheme.
+The protocol argument can be a reference to a list of protocols.
+
+    $robot->no_proxy(domain1, ... domainN);
+
+Specifies that proxies should not be used for the specified
+domains or hosts.
+
+    $robot->env_proxy();
+
+Load proxy settings from I<protocol>B<_proxy> environment variables:
+C<ftp_proxy>, C<http_proxy>, C<no_proxy>, etc.
+
+=cut
+
+#------------------------------------------------------------------------------
+
+sub proxy
+{
+    my $self  = shift;
+    my @argv  = @ARG;
+
+    return $self->{ 'AGENT' }->proxy( @argv );
+}
+
+sub no_proxy
+{
+    my $self  = shift;
+    my @argv  = @ARG;
+
+    return $self->{ 'AGENT' }->no_proxy( @argv );
+}
+
+sub env_proxy
+{
+    my $self  = shift;
+
+    return $self->{ 'AGENT' }->env_proxy();
+}
+
+#==============================================================================
 #
-# This function calls &check_image_map while traversing the parsed HTML to
-# check avoid links to server side image maps that are covered by
-# client side image maps.
+# Private Methods
 #
-#=======================================================================
+#==============================================================================
+
+#------------------------------------------------------------------------------
+#
+# required_attributes_set - check that the required attributes have been set
+#
+#------------------------------------------------------------------------------
+
+sub required_attributes_set
+{
+    my $self = shift;
+
+    $self->verbose( "Check that the required attributes are set ...\n" );
+    my $status = 1;
+
+    for ( qw( NAME VERSION EMAIL ) )
+    {
+        if ( not defined $self->{ $_ } )
+        {
+            $self->warn( "You haven't set the $_ attribute" );
+            $status = 0;
+        }
+    }
+
+    $self->{ 'AGENT' }->from( $self->{ 'EMAIL' } );
+    $self->{ 'AGENT' }->agent( $self->{ 'NAME' } . '/' . $self->{ 'VERSION' } );
+
+    if ( defined( $self->{ 'TRAVERSAL' } ) )
+    {
+	# check that TRAVERSAL is set to a legal value
+	
+	unless (
+            $self->{ 'TRAVERSAL' } eq 'depth' or
+            $self->{ 'TRAVERSAL' } eq 'breadth' 
+        )
+	{
+	    $self->warn( <<WARNING );
+Ignoring unknown traversal method $self->{ TRAVERSAL }; using depth
+WARNING
+	    $self->{ 'TRAVERSAL' } = 'depth';
+	}
+    }
+    else
+    {
+        $self->{ 'TRAVERSAL' } = 'depth';
+    }
+
+    $self->verbose( "Traversal type set to $self->{ 'TRAVERSAL' }\n" );
+
+    return $status;
+}
+
+#------------------------------------------------------------------------------
+#
+# required_hooks_set - check that the required hooks have been set
+#
+#------------------------------------------------------------------------------
+
+sub required_hooks_set
+{
+    my $self = shift;
+
+    $self->verbose( "Check that the required hooks are set ...\n" );
+
+    if ( not exists $self->{ 'HOOKS' }->{ 'follow-url-test' } )
+    {
+        $self->warn( "You must provide a `follow-url-test' hook." );
+        return 0;
+    }
+
+    my $status = 0;
+
+    for ( 
+        qw( 
+            invoke-on-all-url 
+            invoke-on-followed-url
+            invoke-on-contents
+            invoke-on-link
+        )
+    )
+    {
+        $status = 1 if exists $self->{ 'HOOKS' }->{ $_ };
+    }
+
+
+    $self->warn( "You must provide at least one invoke-on-* hook." )
+        unless $status
+    ;
+    return $status;
+}
+
+#------------------------------------------------------------------------------
+#
+# extract_links - extract links from a URL, using HTML::LinkExtor:
+#       $url            - a URI::URL object for the URL
+#       $base           - the base (from the HTTP::Response)
+#       $contents       - the contents (from the HTTP::Response)
+#
+#------------------------------------------------------------------------------
 
 sub extract_links
 {
     my $self        = shift;
     my $url         = shift;
-    my $response    = shift;
-    my $structure   = shift;
-    my $filename    = shift;
+    my $base        = shift;
+    my $contents    = shift;
 
     my %url_seen;
 
-    $self->verbose( "Extract links ..." );
-    my $base = $response->base;
-
-    my $fh = new IO::File $filename;
-    unless ( defined $fh )
-    {
-        $self->warn( "Can't open $filename: $!" );
-    }
-    my $html = join( '', <$fh> );
-    $fh->close();
+    $self->verbose( "Extract links from $url (base = $base) ..." );
 
     my ( @links );
 
@@ -534,7 +875,7 @@ sub extract_links
                 return;
             }
 
-	    $self->verbose( "\n\t$link ..." );
+            $self->verbose( "\n\t$link ..." );
             # ignore page internal links
 
             return if $link =~ m!^#!;
@@ -545,20 +886,28 @@ sub extract_links
 
             # only follow html links (.html or .htm or no extension)
 
-            unless ( $link =~ /\.s?html?/ )
-            # lets assume .html type links really are text/html
+            unless ( $link =~ /\.s?html?/ || $link =~ m{/$} )
+            # lets assume .s?html  or "/" type links really are text/html
             {
                 # put in some obvious ones here ...
-                return if $link =~ /(?:ftp|gopher|mailto|news|telnet):/;
+                return if $link =~ 
+                    /(?:ftp|gopher|mailto|news|telnet|javascript):/
+                ;
                 return if $link =~ /\.(?:gif|jpe?g)/;
-		$self->verbose( " check mime type ..." );
-                return unless $self->check_mime_type( $link, [ 'text/html' ] );
+                if ( $self->{ 'CHECK_MIME_TYPES' } )
+                {
+                    $self->verbose( " check mime type ..." );
+                    return unless 
+                        $self->check_mime_type( $link, [ 'text/html' ] )
+                    ;
+                }
             }
 
             # only follow links we haven't seen yet ...
 
             return if $url_seen{ $link };
             $url_seen{ $link }++;
+
             my $link_url = eval { new URI::URL( $link, $url ) };
 
             if ( $EVAL_ERROR )
@@ -569,15 +918,22 @@ sub extract_links
                 next;
             }
             my $link_url_abs = $link_url->abs();
-	    $self->verbose( " OK" );
-            push( @links, $link_url->abs() );
+            return if ( 
+                exists $self->{ 'HOOKS' }->{ 'add-url-test' } and 
+                not $self->invoke_hook_functions( 
+                    'add-url-test', 
+                    $link_url_abs
+                ) 
+            );
+            push( @links, $link_url_abs );
+            $self->verbose( " OK" );
         },
         $base
     );
 
     # do the business ...
 
-    $link_extor->parse( $html );
+    $link_extor->parse( $contents );
 
     # ... and return the links created in the callback
 
@@ -585,19 +941,19 @@ sub extract_links
     return( @links );
 }
 
-#==============================================================================
+#------------------------------------------------------------------------------
 #
 # check_mime_type( $url, [ $type1, $type2, ...]  - do a head request on the
 # link, and check that it is of one of the required type ($type1, $type2,
 # etc.). Returns 1 if the head reports a match, 0 otherwise
 #
-#==============================================================================
+#------------------------------------------------------------------------------
 
 sub check_mime_type
 {
-    my $self = shift;
-    my $url = shift;
-    my $mime_types = shift;
+    my $self            = shift;
+    my $url             = shift;
+    my $mime_types      = shift;
 
     my $request = new HTTP::Request( 'HEAD', $url );
     return 0 unless $request;
@@ -607,6 +963,7 @@ sub check_mime_type
             'Accept-Language' => join( ',', @{ $self->{ 'ACCEPT_LANGUAGE' } } )
         )
     }
+    $self->verbose( " HEAD $url ..." );
     my $response = $self->{ 'AGENT' }->request( $request );
     return 0 unless defined $response;
     return 0 unless $response->is_success;
@@ -619,25 +976,27 @@ sub check_mime_type
     return 0;
 }
 
-#=======================================================================
+#------------------------------------------------------------------------------
+#
 # check_protocol() - check the page for per-page robot exclusion commands
-#	$structure - an HTML::Element object for the page to check
+#       $structure - an HTML::Element object for the page to check
 #
 # This function looks for page specific robot exclusion commands.
 # At the moment the only one we look for is the META element with
 # a NAME attribute of ROBOTS:
 #
-#	<META NAME="ROBOTS" CONTENT="NOINDEX">
-#		This means that the Robot should not look at the contents
-#		of this page. Ok to follow links though.
+#       <META NAME="ROBOTS" CONTENT="NOINDEX">
+#       This means that the Robot should not look at the contents
+#       of this page. Ok to follow links though.
 #
-#	<META NAME="ROBOTS" CONTENT="NOFOLLOW">
-#		This means that the Robot should ignore any links on this
-#		page. Ok to look at the contents though.
+#       <META NAME="ROBOTS" CONTENT="NOFOLLOW">
+#       This means that the Robot should ignore any links on this
+#       page. Ok to look at the contents though.
 #
-#	CONTENT="NONE" is NOINDEX and NOFOLLOW together. You can also
+#       CONTENT="NONE" is NOINDEX and NOFOLLOW together. You can also
 #       specify this with CONTENT="nofollow,noindex"
-#=======================================================================
+#
+#------------------------------------------------------------------------------
 
 sub check_protocol
 {
@@ -648,151 +1007,97 @@ sub check_protocol
     my $noindex    = 0;
     my $nofollow   = 0;
 
+    $self->verbose( "Check META NAME=ROBOTS ...\n" );
 
-    $self->verbose( "Check META NAME=ROBOTS ..." );
-    #-------------------------------------------------------------------
     # recursively traverse the page elements, looking for META with
     # NAME=ROBOTS, then look for directives in the CONTENTS.
-    #-------------------------------------------------------------------
-    $structure->traverse(sub
-                         {
-                             my $node        = shift;
-                             my $start_flag  = shift;
-                             my $depth       = shift;
+    
+    $structure->traverse(
+        sub {
+            my $node        = shift;
+            my $start_flag  = shift;
+            my $depth       = shift;
 
-                             my $directive;
-                             my $name;
-                             my $content;
+            return 1 unless $start_flag;
+            return 1 if $node->tag() ne 'meta';
+            my $name = $node->attr( 'name' );
+            return 1 unless defined $name;
+            return 1 unless lc( $name ) eq 'robots';
+            my $content = lc( $node->attr( 'content' ) );
+            foreach my $directive ( split( /,/, $content ) )
+            {
+                if ( $directive eq 'nofollow' or $directive eq 'none' )
+                {
+                    $nofollow = 1;
+                }
+                if ( $directive eq 'noindex' or $directive eq 'none' )
+                {
+                    $noindex  = 1;
+                }
+            }
+            return 0;
+        },
+        1
+    );
 
+    $self->verbose( "ROBOT EXCLUSION -- IGNORING LINKS\n") if $nofollow;
+    $self->verbose( "ROBOT EXCLUSION -- IGNORING CONTENT\n") if $noindex;
 
-                             return 1 unless $start_flag;
-                             return 1 if $node->tag() ne 'meta';
-                             $name = $node->attr('name');
-                             return 1 unless defined $name;
-                             return 1 unless lc($name) eq 'robots';
-                             $content = lc($node->attr('content'));
-                             foreach $directive (split(/,/, $content))
-                             {
-                                 $nofollow = 1 if ($directive eq 'nofollow'
-                                                   || $directive eq 'none');
-                                 $noindex  = 1 if ($directive eq 'noindex'
-                                                   || $directive eq 'none');
-                             }
-
-                             return 0;
-                         },
-                         1);
-
-    $self->verbose("  ROBOT EXCLUSION -- IGNORING LINKS\n")   if $nofollow;
-    $self->verbose("  ROBOT EXCLUSION -- IGNORING CONTENT\n") if $noindex;
-    $self->verbose( "\n" );
-
-    return ($noindex, $nofollow);
+    return ( $noindex, $nofollow );
 }
 
-
-#=======================================================================
-# get_url() - retrieve the document referenced by a url
-#	$url	- the URL to retrieve (a URI::URL object, or text URL)
-#	RETURNS	  the path to the local temp file which contains URL
+#------------------------------------------------------------------------------
 #
-# This function takes a URL and retrieves the file referenced.
-# We return the path to the local temporary file which contains a
-# copy of the file referenced.
-# The caller is expected to unlink the file once it is no longer needed.
-#=======================================================================
+# get_url() - retrieve the document referenced by a url
+#       $url    - the URL to retrieve (a URI::URL object, or text URL)
+#       RETURNS the HTTP::Response
+#
+#------------------------------------------------------------------------------
 
 sub get_url
 {
     my $self       = shift;
     my $url        = shift;
 
-    my $filename   = $self->{'WORKFILE'};
-    my $request    = new HTTP::Request('GET', $url);
+    my $request = new HTTP::Request( 'GET', $url );
     if ( ref( $self->{ 'ACCEPT_LANGUAGE' } ) eq 'ARRAY' )
     {
         my @lang = @{ $self->{ 'ACCEPT_LANGUAGE' } };
         $request->push_header( 'Accept-Language' => join( ',', @lang ) );
     }
-    my $response;
-    my $fh;
-    my $structure;
 
-    #---------------------------------------------------------------------
     # Is there a modified-since hook?
-    #---------------------------------------------------------------------
-    if (exists $self->{'HOOKS'}->{'modified-since'})
+
+    if ( exists $self->{ 'HOOKS' }->{ 'modified-since' } )
     {
-        my $time = $self->invoke_hook_functions('modified-since', $url);
-
-
-        if (defined $time && $time > 0)
+        my $time = $self->invoke_hook_functions( 'modified-since', $url );
+        if ( defined $time && $time > 0 )
         {
-            $request->if_modified_since(int($time));
+            $request->if_modified_since( int( $time ) );
         }
     }
 
-    #---------------------------------------------------------------------
     # make the request
-    #---------------------------------------------------------------------
 
     $self->verbose( "$self->{ AGENT } GET $url ..." );
-    $response = $self->{'AGENT'}->request($request);
+    my $response = $self->{ 'AGENT' }->request( $request );
     $self->verbose( "\n" );
 
-    #-------------------------------------------------------------------
-    # If the request failed, or we get a 304 (not modified), then we
-    # can stop at this point.
-    #-------------------------------------------------------------------
-    if ($response->is_error || $response->code == RC_NOT_MODIFIED)
-    {
-	return ($response, undef, undef);
-    }
-
-    #---------------------------------------------------------------------
-    # create a local copy of the URL's contents
-    #---------------------------------------------------------------------
-
-    $self->verbose( "create a local copy of $url contents ($filename) ..." );
-    $fh = new IO::File("> $filename");
-    if (!defined $fh)
-    {
-	$self->warn("failed to open work file for local copy of URL",
-                    "URL:   $url",
-                    "Error: $OS_ERROR");
-	return ($response, undef, undef);
-    }
-    print $fh $response->content;
-    $fh->close();
-    $self->verbose( "\n" );
-
-    #---------------------------------------------------------------------
-    # Parse the HTML into a structure which we can traverse, etc.
-    #---------------------------------------------------------------------
-
-    $self->verbose(  "Parse the HTML into HTML::TreeBuilder structure ..." );
-    if ($response->content_type eq 'text/html')
-    {
-        $structure = new HTML::TreeBuilder;
-        $structure->ignore_text if $self->getAttribute( 'IGNORE_TEXT' );
-        $structure->ignore_unknown if $self->getAttribute( 'IGNORE_UNKNOWN' );
-        $structure->parse( $response->content );
-    }
-    $self->verbose( "\n" );
-
-    return ($response, $structure, $filename);
+    return $response;
 }
 
-#=======================================================================
+#------------------------------------------------------------------------------
+#
 # initialise() - initialise global variables, contents, tables, etc
-#	$self   - the robot object being initialised
-#	@options - a LIST of (attribute, value) pairs, used to specify
-#		   initial values for robot attributes.
-#	RETURNS    undef if we failed for some reason, non-zero for success.
+#       $self   - the robot object being initialised
+#       @options - a LIST of (attribute, value) pairs, used to specify
+#               initial values for robot attributes.
+#       RETURNS    undef if we failed for some reason, non-zero for success.
 #
 # Initialise the robot, setting various attributes, and creating the
 # User Agent which is used to make requests.
-#=======================================================================
+#
+#------------------------------------------------------------------------------
 
 sub initialise
 {
@@ -801,55 +1106,43 @@ sub initialise
 
     my $attribute;
 
-
     $self->create_agent( $options ) || return undef;
 
-    #---------------------------------------------------------------------
     # set attributes which are passed as arguments
-    #---------------------------------------------------------------------
-    foreach $attribute (keys %$options)
+    
+    foreach $attribute ( keys %$options )
     {
-	$self->setAttribute($attribute, $options->{$attribute});
+        $self->setAttribute( $attribute, $options->{ $attribute } );
     }
 
-    #---------------------------------------------------------------------
     # set those attributes which have a default value,
     # and which weren't set on creation.
-    #---------------------------------------------------------------------
-    foreach $attribute (keys %ATTRIBUTE_DEFAULT)
-    {
-	if (!exists $self->{$attribute})
-	{
-	    $self->{$attribute} = $ATTRIBUTE_DEFAULT{$attribute};
-	}
-    }
 
-    #---------------------------------------------------------------------
-    # TMPDIR is the directory to create any temporary files in.
-    # WORKFILE is where we put our local copy of URLs.
-    #---------------------------------------------------------------------
-    if (!exists $self->{'TMPDIR'})
+    foreach $attribute ( keys %ATTRIBUTE_DEFAULT )
     {
-        $self->{'TMPDIR'} = &pick_tmpdir($self, @TMPDIR_OPTIONS);
+        if ( not exists $self->{ $attribute } )
+        {
+            $self->{ $attribute } = $ATTRIBUTE_DEFAULT{ $attribute };
+        }
     }
-    $self->{'WORKFILE'} = $self->{'TMPDIR'}.'/'.$self->{'NAME'}.$$;
 
     return $self;
 }
 
-#=======================================================================
+#------------------------------------------------------------------------------
+#
 # create_agent() - create the User-Agent which will perform requests
 #
-# $self->{'AGENT'} holds the UserAgent object we use to perform
+# $self->{ 'AGENT' } holds the UserAgent object we use to perform
 # HTTP requests. The RobotUA class gives us a UserAgent which follows
 # the robot exclusion protocol.
-#=======================================================================
+#
+#------------------------------------------------------------------------------
 
 sub create_agent
 {
-    my $self = shift;
+    my $self    = shift;
     my $options = shift;
-
 
     my $ua = delete $options->{ 'USERAGENT' };
     if ( defined $ua )
@@ -858,11 +1151,10 @@ sub create_agent
     }
     else
     {
-        eval { $self->{'AGENT'} = new LWP::RobotUA('NAME', 'FROM') };
-        if (!$self->{'AGENT'})
+        eval { $self->{ 'AGENT' } = new LWP::RobotUA( 'NAME', 'FROM' ) };
+        if ( not $self->{ 'AGENT' } )
         {
-            $self->warn("failed to create User Agent object.",
-                        "Error: $EVAL_ERROR\n");
+            $self->warn( "failed to create User Agent object: $EVAL_ERROR\n" );
             return undef;
         }
     }
@@ -870,229 +1162,8 @@ sub create_agent
     return 1;
 }
 
-#=======================================================================
-
-=head2 setAttribute
-
-  $robot->setAttribute( ... attribute-value-pairs ... );
-
-Change the value of one or more robot attributes.
-Attributes are identified using a string, and take scalar values.
-For example, to specify the name of your robot,
-you set the C<NAME> attribute:
-
-   $robot->setAttribute('NAME' => 'WebStud');
-
-The supported attributes for the Robot module are listed below,
-in the I<ROBOT ATTRIBUTES> section.
-
-=cut
-
-#-----------------------------------------------------------------------
-# Don't look Ma! It's gross.
-# This is left-over-from-the-early-days-code. Due for a rework. Sorry.
-#=======================================================================
-
-sub setAttribute
-{
-    my $self   = shift;
-    my @attrs  = @ARG;
-
-    my $attribute;
-    my $value;
-
-
-    while (@attrs > 1)
-    {
-        $attribute = shift @attrs;
-        $value     = shift @attrs;
-
-	if (!exists $ATTRIBUTES{$attribute})
-	{
-	    $self->warn("unknown attribute in setAttribute() - ignoring it.",
-                        "Attribute: $attribute");
-	    next;
-	}
-	$self->set_attribute($attribute, $value);
-    }
-    $self->warn("odd number of arguments to setAttribute!") if @attrs > 0;
-}
-
-#=======================================================================
-# set_attribute() - actually sets attribute, and performs associated actions
-#	$attribute - name of attribute to set
-#	$new_value - new value for the specified attribute
+#------------------------------------------------------------------------------
 #
-# This private function is invoked from the setAttribute() method,
-# and is used to actually set the value of an attribute. We also
-# perform any actions which are associated with setting the attribute.
-#
-# NOTE: This assumes that the AGENT exists. A fair assumption at the
-#       moment, though that might change, and then this will have to too!
-#=======================================================================
-
-sub set_attribute
-{
-    my $self       = shift;
-    my $attribute  = shift;
-    my $new_value  = shift;
-
-
-    $self->{$attribute} = $new_value;
-
-    if ($attribute eq 'IGNORE_TEXT')
-    {
-	#---------------------------------------------------------------
-	# when building structure of HTML, do we include content?
-	#---------------------------------------------------------------
-    }
-    elsif ($attribute eq 'TRAVERSAL')
-    {
-	#---------------------------------------------------------------
-	# check that TRAVERSAL is set to a legal value
-	#---------------------------------------------------------------
-	if ($new_value ne 'depth' && $new_value ne 'breadth')
-	{
-	    $self->warn("ignoring unknown traversal method, using `depth'.",
-                        "Value: $new_value");;
-	    $self->{'TRAVERSAL'} = 'depth';
-	}
-    }
-    elsif ($attribute eq 'EMAIL')
-    {
-        $self->{'AGENT'}->from($new_value);
-    }
-    elsif (($attribute eq 'NAME' || $attribute eq 'VERSION')
-           && defined $self->{'NAME'} && defined $self->{'VERSION'})
-    {
-        $self->{'AGENT'}->agent($self->{'NAME'}.'/'.$self->{'VERSION'});
-    }
-    elsif ($attribute eq 'REQUEST_DELAY')
-    {
-        $self->{'AGENT'}->delay($new_value);
-    }
-}
-
-#=======================================================================
-
-=head2 getAttribute
-
-  $value = $robot->getAttribute('attribute-name');
-
-Queries a Robot for the value of an attribute.
-For example, to query the version number of your robot,
-you would get the C<VERSION> attribute:
-
-   $version = $robot->getAttribute('VERSION');
-
-The supported attributes for the Robot module are listed below,
-in the I<ROBOT ATTRIBUTES> section.
-
-=cut
-
-#=======================================================================
-
-sub getAttribute
-{
-    my $self       = shift;
-    my $attribute  = shift;
-
-
-    if (!exists $ATTRIBUTES{$attribute})
-    {
-	$self->warn("unknown attribute passed to getAttribute()",
-                    "Attribute: $attribute",
-                    "Returning: undef");
-	return undef;
-    }
-
-    return $self->{$attribute};
-}
-
-#=======================================================================
-
-=head2 getAgent
-
-  $agent = $robot->getAgent();
-
-Returns the agent that is being used by the robot.
-
-=cut
-
-#=======================================================================
-
-sub getAgent
-{
-    my $self = shift;
-
-    return $self->{ 'AGENT' };
-}
-
-#=======================================================================
-
-=head2 addUrl
-
-  $robot->addUrl( $url1, ..., $urlN );
-
-Used to add one or more URLs to the queue for the robot.
-Each URL can be passed as a simple string,
-or as a URI::URL object.
-
-Returns True (non-zero) if all URLs were successfully added,
-False (zero) if at least one of the URLs could not be added.
-
-=cut
-
-#=======================================================================
-
-sub addUrl
-{
-    my $self       = shift;
-    my @list       = @ARG;
-
-    my $status     = 1;
-    my $url;
-    my $urlObject;
-
-
-    foreach $url (@list)
-    {
-	next if exists $self->{'SEEN_URL'}->{$url};
-
-	#---------------------------------------------------------------
-	# create a URI::URL object for the url, if needed
-	#---------------------------------------------------------------
-	if (ref $url)
-	{
-	    $urlObject = $url;
-	}
-        else
-	{
-	    $urlObject = eval { new URI::URL($url) };
-	    if ($EVAL_ERROR)
-	    {
-		$self->warn("addUrl() unable to create URI::URL object",
-                            "URL:   $url",
-                            "Error: $EVAL_ERROR");
-		$status = 0;
-		next;
-	    }
-	}
-
-	#---------------------------------------------------------------
-	# Mark the URL as having been seen by the robot, then add it
-	# to the list of URLs for the robot to visit. Doing it this way
-	# means we won't get duplicate URLs on the list.
-	#---------------------------------------------------------------
-	$self->{'SEEN_URL'}->{$url} = 1;
-	$self->{'URL_LIST'} = [] if !exists $self->{'URL_LIST'};
-	push(@{ $self->{'URL_LIST'} }, $urlObject);
-    }
-
-    return $status;
-}
-
-#========================================================================
 # next_url() - get the next URL which should be traversed
 #	RETURNS the next URL to visit, or undef if there are no
 #	        URLs on the list.
@@ -1100,37 +1171,38 @@ sub addUrl
 # This function is used to get the next URL which the robot should visit.
 # Depending on the traversal order, we get the next URL from the front
 # or back of the list of unvisited URLs.
-#========================================================================  
+#
+#------------------------------------------------------------------------------
 
 sub next_url
 {
     my $self    = shift;
 
-
-    #-------------------------------------------------------------------
     # We return 'undef' to signify no URLs on the list
-    #-------------------------------------------------------------------
-    if (!exists $self->{'URL_LIST'} || @{ $self->{'URL_LIST'} } == 0)
+    
+    if ( not exists $self->{ 'URL_LIST' } or @{ $self->{ 'URL_LIST' } } == 0 )
     {
 	return undef;
     }
 
-    if ($self->{'TRAVERSAL'} eq 'depth')
+    if ( $self->{ 'TRAVERSAL' } eq 'depth' )
     {
-	return pop @{ $self->{'URL_LIST'} };
+	return pop @{ $self->{ 'URL_LIST' } };
     }
 
-    return shift @{ $self->{'URL_LIST'} };
+    return shift @{ $self->{ 'URL_LIST' } };
 }
 
-#========================================================================
+#------------------------------------------------------------------------------
+#
 # invoke_hook_procedures() - invoke a specific set of hook procedures
 #	$self      - the object for the robot we're invoking hooks on
 #	$hook_name - a string identifying the hook functions to invoke
 #	@argv      - zero or more arguments which are passed to hook function
 #
 # This is used to invoke hooks which do not return any value.
-#========================================================================  
+#
+#------------------------------------------------------------------------------
 
 sub invoke_hook_procedures
 {
@@ -1138,20 +1210,16 @@ sub invoke_hook_procedures
     my $hook_name  = shift;
     my @argv       = @ARG;
 
-    my $hookfn;
-
-
-    return unless exists $self->{'HOOKS'}->{$hook_name};
-
-    foreach $hookfn (@{ $self->{'HOOKS'}->{$hook_name} })
+    return unless exists $self->{ 'HOOKS' }->{ $hook_name };
+    foreach my $hookfn ( @{ $self->{ 'HOOKS' }->{ $hook_name } } )
     {
-	&$hookfn($self, $hook_name, @argv);
+	&$hookfn( $self, $hook_name, @argv );
     }
-
     return;
 }
 
-#========================================================================
+#------------------------------------------------------------------------------
+#
 # invoke_hook_functions() - invoke a specific set of hook functions
 #	$self     - the object for the robot we're invoking hooks on
 #	$hook_name - a string identifying the hook functions to invoke
@@ -1160,7 +1228,8 @@ sub invoke_hook_procedures
 # This is used to invoke hooks which return a success/failure value.
 # If there is more than one function for the hook, we OR the results
 # together, so that if one passes, the hook is deemed to have passed.
-#========================================================================  
+#
+#------------------------------------------------------------------------------
 
 sub invoke_hook_functions
 {
@@ -1169,214 +1238,58 @@ sub invoke_hook_functions
     my @argv       = @ARG;
 
     my $result     = 0;
-    my $hookfn;
 
+    return $result unless exists $self->{ 'HOOKS' }->{ $hook_name };
 
-    return $result unless exists $self->{'HOOKS'}->{$hook_name};
-
-    foreach $hookfn (@{ $self->{'HOOKS'}->{$hook_name} })
+    foreach my $hookfn ( @{ $self->{ 'HOOKS' }->{ $hook_name } } )
     {
-	$result |= &$hookfn($self, $hook_name, @argv);
+	$result ||= &$hookfn( $self, $hook_name, @argv );
     }
-
     return $result;
 }
 
-#=======================================================================
-
-=head2 addHook
-
-  $robot->addHook($hook_name, \&hook_function);
-  
-  sub hook_function { ... }
-
-Register a I<hook> function which should be invoked by the robot at
-a specific point in the control flow. There are a number of
-I<hook points> in the robot, which are identified by a string.
-For a list of hook points, see the B<SUPPORTED HOOKS> section below.
-
-If you provide more than one function for a particular hook,
-then the hook functions will be invoked in the order they were added.
-I.e. the first hook function called will be the first hook function
-you added.
-
-=cut
-
-#=======================================================================
-
-sub addHook
-{
-    my $self       = shift;
-    my $hook_name  = shift;
-    my $hook_fn    = shift;
-
-
-    if (!exists $SUPPORTED_HOOKS{$hook_name})
-    {
-	$self->warn("unknown hook name passed to addHook(). Ignoring it!",
-                    "Hook Name: $hook_name");
-	return undef;
-    }
-
-    if (ref($hook_fn) ne 'CODE')
-    {
-	$self->warn("not function reference passed to addHook(). Ignoring.",
-                    "Hook Name: $hook_name");
-	return undef;
-    }
-
-    if (exists $self->{'HOOKS'}->{$hook_name})
-    {
-	push(@{ $self->{'HOOKS'}->{$hook_name} }, $hook_fn);
-    }
-    else
-    {
-	$self->{'HOOKS'}->{$hook_name} = [$hook_fn];
-    }
-
-    return 1;
-}
-
-#=======================================================================
-
-=head2 proxy, no_proxy, env_proxy
-
-These are convenience functions are setting proxy information on the
-User agent being used to make the requests.
-
-    $robot->proxy( protocol, proxy );
-
-Used to specify a proxy for the given scheme.
-The protocol argument can be a reference to a list of protocols.
-
-    $robot->no_proxy(domain1, ... domainN);
-
-Specifies that proxies should not be used for the specified
-domains or hosts.
-
-    $robot->env_proxy();
-
-Load proxy settings from I<protocol>B<_proxy> environment variables:
-C<ftp_proxy>, C<http_proxy>, C<no_proxy>, etc.
-
-=cut
-
-#=======================================================================
-# proxy(), no_proxy(), env_proxy() - proxy setting routines
+#------------------------------------------------------------------------------
 #
-# These routines mirror those provide by the UserAgent. We just
-# pass arguments to the equivalent methods on the Agent.
-#=======================================================================
-
-sub proxy
-{
-    my $self  = shift;
-    my @argv  = @ARG;
-
-
-    return $self->{'AGENT'}->proxy(@argv);
-}
-
-sub no_proxy
-{
-    my $self  = shift;
-    my @argv  = @ARG;
-
-
-    return $self->{'AGENT'}->no_proxy(@argv);
-}
-
-sub env_proxy
-{
-    my $self  = shift;
-
-
-    return $self->{'AGENT'}->env_proxy();
-}
-
-sub DESTROY
-{
-    my $self = shift;
-
-
-    unlink $self->{'WORKFILE'} if defined $self->{'WORKFILE'};
-}
-
-#========================================================================
-# pick_tmpdir() - pick a temporary working directory
-#	@options - a list of possible directories
-#
-# This function takes a list of directories and tries them in order
-# until it finds one which exists, and which we have write permission to.
-# If we find one, then the path is returned, as a directory in which
-# we can create temporary working files. If all else fails, we default
-# to '.', the current directory.
-#
-# If the TMPDIR environment variable is set, then we try that directory
-# first.
-#========================================================================  
-sub pick_tmpdir
-{
-    my $self     = shift;
-    my @options  = @ARG;
-
-    my $tmpdir;
-    my $ROBOT    = $self->{'NAME'};
-
-
-    unshift(@options, $ENV{'TMPDIR'}) if exists $ENV{'TMPDIR'};
-    foreach $tmpdir (@options)
-    {
-	return $tmpdir if (-d $tmpdir && -w $tmpdir);
-    }
-
-    $self->warn("unable to find a temporary directory.",
-                "I tried: ".join(' ', @options));
-    return undef;
-}
-
-#========================================================================
 # verbose() - display a reporting message if we're in verbose mode
 #	$self  - the robot object
 #	@lines - a LIST of one or more strings, which are print'ed to
 #		 standard error output (STDERR) if VERBOSE attribute has
 #		 been set on the robot.
-#========================================================================
+#
+#------------------------------------------------------------------------------
+
 sub verbose
 {
     my $self   = shift;
-    my @lines  = @ARG;
 
-
-    print STDERR @lines if $self->{'VERBOSE'};
+    print STDERR @ARG if $self->{ 'VERBOSE' };
 }
 
-#========================================================================
+#------------------------------------------------------------------------------
+#
 # warn() - our own warning routine, generate standard format warnings
-#========================================================================
+#
+#------------------------------------------------------------------------------
+
 sub warn
 {
     my $self  = shift;
     my @lines = shift;
 
-    my $me    = ref $self;
-    my $line;
-
+    my $me = ref $self;
 
     print STDERR "$me: ", shift @lines, "\n";
-    foreach $line (@lines)
+    foreach my $line ( @lines )
     {
-        print STDERR ' ' x (length($me) +2), $line, "\n";
+        print STDERR ' ' x ( length( $me ) + 2 ), $line, "\n";
     }
 }
 
-#-----------------------------------------------------------------------
-#-----------------------------------------------------------------------
+#==============================================================================
 #
 #		END OF CODE - POD DOCUMENTATION FOLLOWS
 #
-#-----------------------------------------------------------------------
-#-----------------------------------------------------------------------
+#==============================================================================
 
 =head1 ROBOT ATTRIBUTES
 
@@ -1430,13 +1343,6 @@ Valid values are I<depth> and I<breadth>.
 
 Default: depth
 
-=item REQUEST_DELAY
-
-Specifies whether the delay (in minutes) between successive GETs
-from the same server.
-
-Default: 1
-
 =item IGNORE_TEXT
 
 Specifies whether the HTML structure passed to the I<invoke-on-contents>
@@ -1449,6 +1355,14 @@ Default: 1 (true)
 
 Specifies whether the HTML structure passed to the I<invoke-on-contents>
 hook function should ignore unkonwn HTML elements.
+
+Default: 1 (true)
+
+=item CHECK_MIME_TYPES
+
+This tells the robot that if it can't easily determine the MIME type of a link
+from its URL, to issue a HEAD request to check the MIME type directly, before
+adding the link.
 
 Default: 1 (true)
 
@@ -1552,7 +1466,7 @@ The C<$response> argument is an object of type HTTP::Response.
 
 =head2 invoke-on-contents
 
-   sub hook { my($robot, $hook, $url, $response, $structure, $filename) = @_; }
+   sub hook { my($robot, $hook, $url, $response, $structure) = @_; }
 
 This hook function is invoked for all URLs for which the contents
 are successfully retrieved.
@@ -1572,13 +1486,6 @@ or just the HTML elements.
 You can set the C<IGNORE_UNKNOWN> attribute to specify whether the structure
 passed includes unkown HTML elements.
 
-The C<$filename> argument is
-the path to a local temporary file which contains
-a local copy of the URL contents.
-You cannot assume that the file will exist after control has returned
-from your hook function.
-
-
 
 =head2 invoke-on-link
 
@@ -1590,6 +1497,13 @@ for every link seen the I<invoke-on-link> hook is invoked with the URL
 of the source page, and the destination URL.
 The destination URL is in canonical form.
 
+=head2 add-url-test
+
+   sub hook { my($robot, $hook_name, $url) = @_; }
+
+This hook function is invoked for all links seen as the robot traverses.
+If the hook function returns non-zero, then the robot will add the URL given by
+$url to its list of URLs to be traversed.
 
 =head2 continue-test
 
@@ -1654,7 +1568,7 @@ not just successful GETs.
 The hook function is passed two arguments: the C<$url> we tried to GET,
 and the C<$response> which resulted.
 
-If you provided a L<modified-since> hook, then provide an invoke-after-get
+If you provided a modified-since hook, then provide an invoke-after-get
 function, and look for error code 304 (or RC_NOT_MODIFIED if you are
 using HTTP::Status, which you should be :-):
 
@@ -1709,14 +1623,12 @@ B<text/html>
    
    #-------------------------------------------------------
    sub validate_contents {
-      my($robot, $hook, $url, $response, $filename) = @_;
+      my($robot, $hook, $url, $response, $structure) = @_;
    
       return unless $response->content_type eq 'text/html';
+
+      # some validation on $structure ...
    
-      print STDERR "\n$url\n";
-   
-      #---- run weblint on local copy of URL contents -----
-      system("weblint -s $filename");
    }
 
 If you are behind a firewall, then you will have to add something
@@ -1820,19 +1732,15 @@ CPAN is mirrored at FTP sites around the world.
 
 =head1 VERSION
 
-This documentation describes version 0.017 of the Robot module.
+This documentation describes version 0.021 of the Robot module.
 The module requires at least version 5.002 of Perl.
 
 =head1 AUTHOR
 
-=over 4
+    Neil Bowers <neilb@cre.canon.co.uk>
+    Ave Wrigley <wrigley@cre.canon.co.uk>
 
-=item Neil Bowers C<E<lt>neilb@cre.canon.co.ukE<gt>>
-=item Ave Wrigley C<E<lt>wrigley@cre.canon.co.ukE<gt>>
-
-=back
-
-Web Department, Canon Research Centre Europe
+    Web Department, Canon Research Centre Europe
 
 =head1 COPYRIGHT
 

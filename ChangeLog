@@ -15,3 +15,29 @@ Wednesday 3 March 1999 - Ave Wrigley <wrigley@cre.canon.co.uk>
 
 * robot does a head request to check the MIME type of potential links, rather
   than relying on filename extension
+
+**** Release 0.018 *****
+
+Thursday April 8 10:52:31 BST 1999
+
+* temporary filename munging changed to avoid problems on Win32
+
+**** Release 0.019 *****
+
+Tuesday April 27 10:57:08 BST 1999
+
+* regex to determine which links are HTML links changed - m{/$} added
+
+**** Release 0.020 *****
+
+Friday May  7 09:54:41 BST 1999
+
+* bug fix for javascript links (thanks to Petr Kristan <petr.kristan@epos.cz>)
+
+**** Release 0.021 *****
+
+* no longer supports $filename argument for invoke-on-contents hook
+* add-url-test hook added
+* listUrls method added
+* unshiftUrl method added
+* CHECK_MIME_TYPES attribute added
