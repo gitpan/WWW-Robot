@@ -1,0 +1,17 @@
+**** Release 0.017 *****
+
+Wednesday 3 March 1999 - Ave Wrigley <wrigley@cre.canon.co.uk>
+
+* uses HTML::TreeBuilder instead of the (depricated) HTML::Parse 
+
+* uses HTML::LinkExtor to extract links
+
+* minor documentation bugs
+
+* IGNORE_UNKNOWN option allows the robot to ignore unknown HTML tags
+
+* ACCEPT_LANGUAGE option allows the user to specify languages accepted by the
+  USER_AGENT
+
+* robot does a head request to check the MIME type of potential links, rather
+  than relying on filename extension
