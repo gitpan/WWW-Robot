@@ -47,3 +47,10 @@ Friday May  7 09:54:41 BST 1999
 Thu Dec  9 11:58:36 GMT 1999
 
 * DELAY attribute added
+
+**** Release 0.024 *****
+
+Wednesday November 15 17:24:40 2006 - Konstantin Matyukhin <kmatyukhin@gmail.com>
+
+* new maintainer release
+* some ancient bugs fixed (Closes: #4209, #6233)

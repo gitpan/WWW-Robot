@@ -173,7 +173,7 @@ use English;
 #------------------------------------------------------------------------------
 
 use vars qw( $VERSION );
-$VERSION = '0.023';
+$VERSION = '0.024';
 
 #------------------------------------------------------------------------------
 #
@@ -1752,14 +1752,16 @@ The module requires at least version 5.002 of Perl.
     Ave Wrigley <wrigley@cre.canon.co.uk>
 
     Web Department, Canon Research Centre Europe
+    
+    Konstantin Matyukhin <kmatyukhin@gmail.com>
 
 =head1 COPYRIGHT
 
 Copyright (C) 1997, Canon Research Centre Europe.
+Copyright (C) 2006, Konstantin Matyukhin
 
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
-
 
 =cut
 
