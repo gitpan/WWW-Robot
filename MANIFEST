@@ -4,3 +4,11 @@ MANIFEST
 README
 ChangeLog
 examples/poacher
+debian/README.Debian
+debian/changelog
+debian/compat
+debian/control
+debian/copyright
+debian/dirs
+debian/docs
+debian/rules

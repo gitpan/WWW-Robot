@@ -54,3 +54,9 @@ Wednesday November 15 17:24:40 2006 - Konstantin Matyukhin <kmatyukhin@gmail.com
 
 * new maintainer release
 * some ancient bugs fixed (Closes: #4209, #6233)
+
+**** Release 0.025 *****
+
+Tuesday January  9 01:29:40 2007 - Konstantin Matyukhin <kmatyukhin@gmail.com>
+
+* bug fix for memory leak (thanks to Vyacheslav Solodovnikov <s@omnicom.ru>)

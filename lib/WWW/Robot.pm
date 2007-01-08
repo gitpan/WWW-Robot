@@ -173,7 +173,7 @@ use English;
 #------------------------------------------------------------------------------
 
 use vars qw( $VERSION );
-$VERSION = '0.024';
+$VERSION = '0.025';
 
 #------------------------------------------------------------------------------
 #
@@ -882,6 +882,8 @@ sub extract_links
 	    $link_extor->extract_links() :
 	    $link_extor->extract_links(@default_link_types)
 	};
+    
+    $link_extor->delete() if defined $link_extor;
 
 	foreach my $link (@eltlinks)
 	{
@@ -895,6 +897,18 @@ sub extract_links
             # strip hashes (i.e. ignore / don't distinguish page internal links)
 
             $link =~ s!#.*!!;
+
+            my $link_url = eval { new URI::URL( $link, $url ) };
+
+            if ( $EVAL_ERROR )
+            {
+                $self->warn("unable to create URL object for link.",
+                            "LINK:  $link",
+                            "Error: $EVAL_ERROR\n");
+                next;
+            }
+	    
+            my $link_url_abs = $link_url->abs();
 
             unless ( $self->{ 'ANY_URL' } ||
                 # only follow html links (.html or .htm or no extension)
@@ -911,7 +925,7 @@ sub extract_links
 		    # grab anchor / area / frame links
                     $self->verbose( " check mime type ..." );
                     next unless 
-                        $self->check_mime_type( $link, [ 'text/html' ] )
+                        $self->check_mime_type( $link_url_abs, [ 'text/html' ] )
                     ;
                 }
             }
@@ -921,16 +935,6 @@ sub extract_links
             next if $url_seen{ $link };
             $url_seen{ $link }++;
 
-            my $link_url = eval { new URI::URL( $link, $url ) };
-
-            if ( $EVAL_ERROR )
-            {
-                $self->warn("unable to create URL object for link.",
-                            "LINK:  $link",
-                            "Error: $EVAL_ERROR\n");
-                next;
-            }
-            my $link_url_abs = $link_url->abs();
             next if ( 
                 exists $self->{ 'HOOKS' }->{ 'add-url-test' } and 
                 not $self->invoke_hook_functions( 
@@ -969,7 +973,7 @@ sub check_mime_type
             'Accept-Language' => join( ',', @{ $self->{ 'ACCEPT_LANGUAGE' } } )
         )
     }
-    $self->verbose( " HEAD $url ..." );
+    $self->verbose( " HEAD $url ...\n" );
     my $response = $self->{ 'AGENT' }->request( $request );
     return 0 unless defined $response;
     return 0 unless $response->is_success;
@@ -1157,7 +1161,7 @@ sub create_agent
     }
     else
     {
-        eval { $self->{ 'AGENT' } = new LWP::RobotUA( 'NAME', 'FROM' ) };
+        eval { $self->{ 'AGENT' } = new LWP::RobotUA( 'NAME', 'FROM@DUMMY' ) };
         if ( not $self->{ 'AGENT' } )
         {
             $self->warn( "failed to create User Agent object: $EVAL_ERROR\n" );
@@ -1752,13 +1756,11 @@ The module requires at least version 5.002 of Perl.
     Ave Wrigley <wrigley@cre.canon.co.uk>
 
     Web Department, Canon Research Centre Europe
-    
-    Konstantin Matyukhin <kmatyukhin@gmail.com>
 
 =head1 COPYRIGHT
 
-Copyright (C) 1997, Canon Research Centre Europe.
-Copyright (C) 2006, Konstantin Matyukhin
+ Copyright (C) 1997, Canon Research Centre Europe.
+ Copyright (C) 2006,2007 Konstantin Matyukhin.
 
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
