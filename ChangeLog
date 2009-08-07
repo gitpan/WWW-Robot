@@ -60,3 +60,9 @@ Wednesday November 15 17:24:40 2006 - Konstantin Matyukhin <kmatyukhin@gmail.com
 Tuesday January  9 01:29:40 2007 - Konstantin Matyukhin <kmatyukhin@gmail.com>
 
 * bug fix for memory leak (thanks to Vyacheslav Solodovnikov <s@omnicom.ru>)
+
+**** Release 0.026 *****
+
+Friday August  7 17:02:40 2009 - Konstantin Matyukhin <kmatyukhin@gmail.com>
+
+* Normaly runs with utf-8 content (Closes: 42870)

@@ -165,6 +165,7 @@ use URI::URL;
 use LWP::RobotUA 1.171;
 use IO::File;
 use English;
+use Encode qw( encode );
 
 #------------------------------------------------------------------------------
 #
@@ -173,7 +174,7 @@ use English;
 #------------------------------------------------------------------------------
 
 use vars qw( $VERSION );
-$VERSION = '0.025';
+$VERSION = '0.026';
 
 #------------------------------------------------------------------------------
 #
@@ -362,6 +363,7 @@ sub run
         {
 
             my $contents = $response->content;
+	    utf8::decode($contents);
             $self->verbose( "Parse $url into HTML::TreeBuilder ..." );
             my $structure = new HTML::TreeBuilder;
             $structure->ignore_text if $self->getAttribute( 'IGNORE_TEXT' );
@@ -870,6 +872,7 @@ sub extract_links
 
     $self->verbose( "Extract links from $url (base = $base) ...\n" );
 
+    utf8::decode($contents);
     my ( $link_extor ) = new HTML::TreeBuilder->new->parse($contents);
 
     my ( @default_link_types ) = ('a','area','frame');
@@ -887,7 +890,6 @@ sub extract_links
 
 	foreach my $link (@eltlinks)
 	{
-
             $self->verbose( "Process link: '$link'\n" );
 
             # ignore page internal links
@@ -907,7 +909,9 @@ sub extract_links
                             "Error: $EVAL_ERROR\n");
                 next;
             }
-	    
+
+	    $URI::URL::ABS_REMOTE_LEADING_DOTS = 1;
+
             my $link_url_abs = $link_url->abs();
 
             unless ( $self->{ 'ANY_URL' } ||
